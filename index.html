@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Fitness PWA - Trainingsplan, Kalorien-Tracking und KI-Import">
+    <meta name="theme-color" content="#1a1a2e">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="FitTrack">
+    <link rel="icon" type="image/png" sizes="192x192" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%231a1a2e' width='192' height='192'/><text x='50%' y='50%' font-size='100' font-weight='bold' fill='%2300d4ff' text-anchor='middle' dominant-baseline='middle'>💪</text></svg>">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="styles.css">
+    <title>FitTrack - Fitness PWA</title>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <h1>FitTrack</h1>
+            <div class="header-date" id="headerDate"></div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="app-main" id="appMain">
+            <!-- Dashboard View -->
+            <section class="view" id="dashboardView">
+                <div class="section-title">Dashboard</div>
+                <div class="dashboard-grid">
+                    <div class="dashboard-card">
+                        <div class="card-label">Heute - Kalorien</div>
+                        <div class="progress-ring">
+                            <svg viewBox="0 0 120 120">
+                                <circle cx="60" cy="60" r="50" class="progress-bg"></circle>
+                                <circle cx="60" cy="60" r="50" class="progress-fill" id="calorieProgress"></circle>
+                            </svg>
+                            <div class="progress-text">
+                                <div id="calorieCount">0</div>
+                                <div class="progress-label">kcal</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-label">Makronährstoffe</div>
+                        <div class="macros-mini">
+                            <div class="macro-bar">
+                                <div class="macro-item protein"><span id="proteinMini">0g</span></div>
+                                <div class="macro-item carbs"><span id="carbsMini">0g</span></div>
+                                <div class="macro-item fat"><span id="fatMini">0g</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-label">Heute - Training</div>
+                        <div class="training-status" id="trainingStatus">
+                            Kein Plan aktiv
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-label">Diese Woche</div>
+                        <div class="week-chart" id="weekChart">
+                            <div class="week-bar">Mo</div>
+                            <div class="week-bar">Di</div>
+                            <div class="week-bar">Mi</div>
+                            <div class="week-bar">Do</div>
+                            <div class="week-bar">Fr</div>
+                            <div class="week-bar">Sa</div>
+                            <div class="week-bar">So</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Essen / Kalorien View -->
+            <section class="view hidden" id="mealView">
+                <div class="section-title">Essen & Kalorien</div>
+                <div class="view-tabs">
+                    <button class="tab-btn active" data-tab="today">Heute</button>
+                    <button class="tab-btn" data-tab="history">Verlauf</button>
+                    <button class="tab-btn" data-tab="import">Importieren</button>
+                </div>
+
+                <!-- Today's Meals -->
+                <div class="tab-content active" id="todayTab">
+                    <div class="meal-sections">
+                        <div class="meal-section" data-meal="breakfast">
+                            <div class="meal-header">
+                                <h3>🌅 Frühstück</h3>
+                                <span class="meal-cals" id="breakfastCals">0 kcal</span>
+                            </div>
+                            <div class="meal-items" id="breakfastItems"></div>
+                            <button class="btn-add-item" data-meal="breakfast">+ Lebensmittel</button>
+                        </div>
+                        <div class="meal-section" data-meal="lunch">
+                            <div class="meal-header">
+                                <h3>🍽️ Mittagessen</h3>
+                                <span class="meal-cals" id="lunchCals">0 kcal</span>
+                            </div>
+                            <div class="meal-items" id="lunchItems"></div>
+                            <button class="btn-add-item" data-meal="lunch">+ Lebensmittel</button>
+                        </div>
+                        <div class="meal-section" data-meal="dinner">
+                            <div class="meal-header">
+                                <h3>🍴 Abendessen</h3>
+                                <span class="meal-cals" id="dinnerCals">0 kcal</span>
+                            </div>
+                            <div class="meal-items" id="dinnerItems"></div>
+                            <button class="btn-add-item" data-meal="dinner">+ Lebensmittel</button>
+                        </div>
+                        <div class="meal-section" data-meal="snack">
+                            <div class="meal-header">
+                                <h3>🥜 Snacks</h3>
+                                <span class="meal-cals" id="snackCals">0 kcal</span>
+                            </div>
+                            <div class="meal-items" id="snackItems"></div>
+                            <button class="btn-add-item" data-meal="snack">+ Lebensmittel</button>
+                        </div>
+                    </div>
+
+                    <div class="daily-summary">
+                        <h3>Zusammenfassung</h3>
+                        <div class="summary-grid">
+                            <div class="summary-item">
+                                <div class="summary-label">Kalorien</div>
+                                <div class="summary-value" id="totalCalories">0</div>
+                                <div class="summary-target">Ziel: <span id="calorieGoal">2000</span></div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-label">Protein</div>
+                                <div class="summary-value" id="totalProtein">0g</div>
+                                <div class="summary-target">Ziel: <span id="proteinGoal">150</span>g</div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-label">Kohlenhydrate</div>
+                                <div class="summary-value" id="totalCarbs">0g</div>
+                                <div class="summary-target">Ziel: <span id="carbsGoal">250</span>g</div>
+                            </div>
+                            <div class="summary-item">
+                                <div class="summary-label">Fett</div>
+                                <div class="summary-value" id="totalFat">0g</div>
+                                <div class="summary-target">Ziel: <span id="fatGoal">67</span>g</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- History Tab -->
+                <div class="tab-content hidden" id="historyTab">
+                    <div id="mealHistory"></div>
+                </div>
+
+                <!-- Import Tab -->
+                <div class="tab-content hidden" id="importTab">
+                    <div class="import-section">
+                        <h3>Mahlzeiten importieren</h3>
+                        <p>Importiere JSON-Dateien mit Mahlzeiten von ChatGPT oder Copilot.</p>
+                        <div class="import-area" id="mealImportArea">
+                            <input type="file" id="mealImportFile" accept=".json" style="display:none;">
+                            <p>📁 Klicke zum Hochladen oder ziehe eine JSON-Datei herein</p>
+                        </div>
+                        <div class="import-example">
+                            <details>
+                                <summary>📋 Beispiel-JSON-Format</summary>
+                                <pre>{
+  "type": "meal_log",
+  "date": "2026-06-17",
+  "meal": "Frühstück",
+  "items": [
+    {
+      "name": "Omelette",
+      "amount": "2 Eier",
+      "calories": 160,
+      "protein": 12,
+      "carbs": 1,
+      "fat": 11
+    }
+  ]
+}</pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Training View -->
+            <section class="view hidden" id="trainingView">
+                <div class="section-title">Training</div>
+                <div class="view-tabs">
+                    <button class="tab-btn active" data-tab="today">Heute</button>
+                    <button class="tab-btn" data-tab="plan">Plan</button>
+                    <button class="tab-btn" data-tab="generator">Generator</button>
+                </div>
+
+                <!-- Today's Training -->
+                <div class="tab-content active" id="trainingTodayTab">
+                    <div id="todayWorkout">
+                        <p class="no-data">Kein Training für heute geplant</p>
+                    </div>
+                </div>
+
+                <!-- Training Plan -->
+                <div class="tab-content hidden" id="trainingPlanTab">
+                    <div id="trainingPlanView">
+                        <p class="no-data">Kein Trainingsplan erstellt</p>
+                    </div>
+                </div>
+
+                <!-- Generator Tab -->
+                <div class="tab-content hidden" id="generatorTab">
+                    <div class="generator-section">
+                        <h3>Trainingsplan Generator</h3>
+                        <div class="form-group">
+                            <label>Trainingsziel</label>
+                            <select id="goalSelect">
+                                <option value="">Wähle ein Ziel...</option>
+                                <option value="muscle">💪 Muskelaufbau</option>
+                                <option value="weight_loss">⚖️ Abnehmen</option>
+                                <option value="strength">🏋️ Kraft</option>
+                                <option value="general">🎯 Allgemein fit</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Trainingslevel</label>
+                            <select id="levelSelect">
+                                <option value="">Wähle dein Level...</option>
+                                <option value="beginner">Anfänger</option>
+                                <option value="intermediate">Fortgeschritten</option>
+                                <option value="advanced">Fortgeschritten+</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Trainingstage pro Woche</label>
+                            <div class="radio-group">
+                                <label><input type="radio" name="days" value="2"> 2 Tage</label>
+                                <label><input type="radio" name="days" value="3"> 3 Tage</label>
+                                <label><input type="radio" name="days" value="4"> 4 Tage</label>
+                                <label><input type="radio" name="days" value="5"> 5 Tage</label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Fokus</label>
+                            <select id="focusSelect">
+                                <option value="">Wähle einen Fokus...</option>
+                                <option value="full_body">Ganzkörper</option>
+                                <option value="push_pull_legs">Push/Pull/Legs</option>
+                                <option value="upper_lower">Oberkörper/Unterkörper</option>
+                            </select>
+                        </div>
+                        <button class="btn-primary" id="generatePlanBtn">Plan erstellen</button>
+                    </div>
+
+                    <div class="import-section" style="margin-top: 2rem;">
+                        <h3>Trainingsplan importieren</h3>
+                        <p>Importiere JSON-Dateien mit Trainingsplänen von ChatGPT oder Copilot.</p>
+                        <div class="import-area" id="planImportArea">
+                            <input type="file" id="planImportFile" accept=".json" style="display:none;">
+                            <p>📁 Klicke zum Hochladen oder ziehe eine JSON-Datei herein</p>
+                        </div>
+                        <div class="import-example">
+                            <details>
+                                <summary>📋 Beispiel-JSON-Format</summary>
+                                <pre>{
+  "type": "workout_plan",
+  "name": "4er Split",
+  "goal": "muscle",
+  "level": "intermediate",
+  "days_per_week": 4,
+  "days": [
+    {
+      "day": "Tag 1",
+      "title": "Push",
+      "exercises": [
+        {
+          "name": "Bankdrücken",
+          "sets": 3,
+          "reps": "8-10",
+          "rest": "90 Sekunden",
+          "notes": "Saubere Technik"
+        }
+      ]
+    }
+  ]
+}</pre>
+                            </details>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Progress View -->
+            <section class="view hidden" id="progressView">
+                <div class="section-title">Fortschritt</div>
+                <div class="view-tabs">
+                    <button class="tab-btn active" data-tab="weight">Gewicht</button>
+                    <button class="tab-btn" data-tab="stats">Statistiken</button>
+                </div>
+
+                <!-- Weight Tab -->
+                <div class="tab-content active" id="weightTab">
+                    <div class="weight-input">
+                        <div class="form-group">
+                            <label>Heutiges Gewicht (kg)</label>
+                            <input type="number" id="weightInput" placeholder="70" step="0.1">
+                            <button class="btn-primary" id="saveWeightBtn">Speichern</button>
+                        </div>
+                    </div>
+                    <div id="weightHistory">
+                        <h3>Gewichtsverlauf</h3>
+                        <div id="weightList"></div>
+                    </div>
+                </div>
+
+                <!-- Stats Tab -->
+                <div class="tab-content hidden" id="statsTab">
+                    <div class="stats-grid" id="statsGrid"></div>
+                </div>
+            </section>
+
+            <!-- Import/Export View -->
+            <section class="view hidden" id="importExportView">
+                <div class="section-title">Import / Export</div>
+                
+                <div class="io-section">
+                    <h3>🤖 KI-Prompts</h3>
+                    <p>Kopiere diese Prompts in ChatGPT oder GitHub Copilot, lasse JSON generieren und importiere das Ergebnis hier.</p>
+                    
+                    <div class="prompt-card">
+                        <h4>Trainingsplan erstellen</h4>
+                        <div class="prompt-text" id="prompt1">
+                            Erstelle einen 4er Split Trainingsplan im JSON-Format für einen Anfänger mit dem Ziel Muskelaufbau. Format:
+                            {
+  "type": "workout_plan",
+  "name": "Planname",
+  "goal": "muscle",
+  "level": "beginner",
+  "days_per_week": 4,
+  "days": [
+    {
+      "day": "Tag 1",
+      "title": "Push",
+      "exercises": [
+        {
+          "name": "Übungsname",
+          "sets": 3,
+          "reps": "8-10",
+          "rest": "90 Sekunden",
+          "notes": "Notizen"
+        }
+      ]
+    }
+  ]
+}
+                        </div>
+                        <button class="btn-copy" onclick="copyPrompt(this)">📋 Kopieren</button>
+                    </div>
+
+                    <div class="prompt-card">
+                        <h4>Mahlzeitenplan erstellen</h4>
+                        <div class="prompt-text" id="prompt2">
+Erstelle einen Ernährungsplan für einen Tag als JSON. Format:
+{
+  "type": "meal_log",
+  "date": "2026-06-17",
+  "meal": "Frühstück",
+  "items": [
+    {
+      "name": "Lebensmittel",
+      "amount": "Portion",
+      "calories": 300,
+      "protein": 25,
+      "carbs": 30,
+      "fat": 10
+    }
+  ]
+}
+                        </div>
+                        <button class="btn-copy" onclick="copyPrompt(this)">📋 Kopieren</button>
+                    </div>
+
+                    <div class="prompt-card">
+                        <h4>Gewichtsverlauf analysieren</h4>
+                        <div class="prompt-text" id="prompt3">
+Analysiere meinen Gewichtsverlauf und gib Empfehlungen. Mein aktuelles Gewicht ist [Gewicht] kg. Ziel: [Zielgewicht] kg. Trainingsplan: [Plan]. Tägliche Kalorien: [Kalorien].
+                        </div>
+                        <button class="btn-copy" onclick="copyPrompt(this)">📋 Kopieren</button>
+                    </div>
+                </div>
+
+                <hr style="margin: 2rem 0; border: none; border-top: 1px solid var(--border-color);">
+
+                <div class="io-section">
+                    <h3>💾 Datenaustausch</h3>
+                    
+                    <div class="export-section">
+                        <h4>Trainingsplan exportieren</h4>
+                        <button class="btn-secondary" id="exportPlanBtn">⬇️ Trainingsplan als JSON</button>
+                    </div>
+
+                    <div class="export-section">
+                        <h4>Mahlzeiten exportieren</h4>
+                        <button class="btn-secondary" id="exportMealsBtn">⬇️ Mahlzeiten als JSON</button>
+                    </div>
+
+                    <div class="export-section">
+                        <h4>Komplettes Backup</h4>
+                        <button class="btn-secondary" id="exportBackupBtn">⬇️ Komplettes Backup (backup.json)</button>
+                        <button class="btn-secondary" id="importBackupBtn">⬆️ Backup importieren</button>
+                        <input type="file" id="backupImportFile" accept=".json" style="display:none;">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section class="view hidden" id="settingsView">
+                <div class="section-title">Einstellungen</div>
+                
+                <div class="settings-group">
+                    <h3>👤 Profil</h3>
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" id="profileName" placeholder="Dein Name">
+                    </div>
+                    <div class="form-group">
+                        <label>Alter</label>
+                        <input type="number" id="profileAge" placeholder="25">
+                    </div>
+                    <div class="form-group">
+                        <label>Geschlecht</label>
+                        <select id="profileGender">
+                            <option value="">Wähle...</option>
+                            <option value="male">Männlich</option>
+                            <option value="female">Weiblich</option>
+                            <option value="other">Sonstiges</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3>🎯 Ernährungsziele</h3>
+                    <div class="form-group">
+                        <label>Tägliches Kaloriendefizit (kcal)</label>
+                        <input type="number" id="settingCalories" placeholder="2000" value="2000">
+                    </div>
+                    <div class="form-group">
+                        <label>Protein-Ziel (g)</label>
+                        <input type="number" id="settingProtein" placeholder="150" value="150">
+                    </div>
+                    <div class="form-group">
+                        <label>Kohlenhydrate-Ziel (g)</label>
+                        <input type="number" id="settingCarbs" placeholder="250" value="250">
+                    </div>
+                    <div class="form-group">
+                        <label>Fett-Ziel (g)</label>
+                        <input type="number" id="settingFat" placeholder="67" value="67">
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <h3>⚙️ App</h3>
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="settingNotifications">
+                        Benachrichtigungen aktivieren
+                    </label>
+                    <div style="margin-top: 1rem;">
+                        <button class="btn-danger" id="clearDataBtn">🗑️ Alle Daten löschen</button>
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="saveSettingsBtn" style="margin-top: 2rem; width: 100%;">Speichern</button>
+            </section>
+        </main>
+
+        <!-- Navigation Bar -->
+        <nav class="app-nav">
+            <button class="nav-btn active" data-view="dashboardView">
+                📊 Dashboard
+            </button>
+            <button class="nav-btn" data-view="mealView">
+                🍽️ Essen
+            </button>
+            <button class="nav-btn" data-view="trainingView">
+                💪 Training
+            </button>
+            <button class="nav-btn" data-view="progressView">
+                📈 Fortschritt
+            </button>
+            <button class="nav-btn" data-view="importExportView">
+                ⚙️ Import
+            </button>
+            <button class="nav-btn" data-view="settingsView">
+                ⚙️ Einst.
+            </button>
+        </nav>
+    </div>
+
+    <!-- Modal for adding meals -->
+    <div class="modal hidden" id="addMealModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Lebensmittel hinzufügen</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Lebensmittel</label>
+                    <input type="text" id="mealName" placeholder="z.B. Omelette">
+                </div>
+                <div class="form-group">
+                    <label>Menge</label>
+                    <input type="text" id="mealAmount" placeholder="z.B. 2 Eier">
+                </div>
+                <div class="form-group">
+                    <label>Kalorien (kcal)</label>
+                    <input type="number" id="mealCalories" placeholder="160">
+                </div>
+                <div class="form-group">
+                    <label>Protein (g)</label>
+                    <input type="number" id="mealProtein" placeholder="12">
+                </div>
+                <div class="form-group">
+                    <label>Kohlenhydrate (g)</label>
+                    <input type="number" id="mealCarbs" placeholder="1">
+                </div>
+                <div class="form-group">
+                    <label>Fett (g)</label>
+                    <input type="number" id="mealFat" placeholder="11">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancelMealBtn">Abbrechen</button>
+                <button class="btn-primary" id="saveMealBtn">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for tracking exercise -->
+    <div class="modal hidden" id="trackExerciseModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="exerciseTitle">Übung tracken</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Durchgeführte Wiederholungen</label>
+                    <input type="number" id="exerciseReps" placeholder="10">
+                </div>
+                <div class="form-group">
+                    <label>Gewicht (kg)</label>
+                    <input type="number" id="exerciseWeight" placeholder="50" step="0.5">
+                </div>
+                <div class="form-group">
+                    <label>Notizen</label>
+                    <textarea id="exerciseNotes" placeholder="Wie fühlte sich die Übung an?"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancelExerciseBtn">Abbrechen</button>
+                <button class="btn-primary" id="saveExerciseBtn">Fertig</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
