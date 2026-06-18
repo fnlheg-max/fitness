@@ -1,0 +1,1200 @@
+/* FitTrack app.js
+   Fügt den Buttons aus index.html echte Funktionen hinzu.
+   Datei im Repo-Root als app.js speichern.
+*/
+(() => {
+  "use strict";
+
+  const STORAGE_KEY = "fittrack_state_v1";
+  const MEALS = ["breakfast", "lunch", "dinner", "snack"];
+  const MEAL_LABELS = {
+    breakfast: "Frühstück",
+    lunch: "Mittagessen",
+    dinner: "Abendessen",
+    snack: "Snacks"
+  };
+
+  const DEFAULT_STATE = {
+    settings: {
+      profileName: "",
+      profileAge: "",
+      profileGender: "",
+      calories: 2000,
+      protein: 150,
+      carbs: 250,
+      fat: 67,
+      notifications: false
+    },
+    meals: {},
+    workoutPlan: null,
+    trainingLogs: {},
+    weights: []
+  };
+
+  let state = loadState();
+  let activeMeal = "breakfast";
+  let activeExercise = null;
+
+  const $ = (selector, root = document) => root.querySelector(selector);
+  const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+  document.addEventListener("DOMContentLoaded", init);
+
+  function init() {
+    setHeaderDate();
+    bindNavigation();
+    bindTabs();
+    bindMeals();
+    bindTraining();
+    bindProgress();
+    bindImportExport();
+    bindSettings();
+    bindModals();
+    loadSettingsIntoForm();
+
+    renderAll();
+    registerServiceWorker();
+  }
+
+  function loadState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      return deepMerge(structuredCloneSafe(DEFAULT_STATE), saved || {});
+    } catch (error) {
+      console.warn("Konnte gespeicherte Daten nicht laden:", error);
+      return structuredCloneSafe(DEFAULT_STATE);
+    }
+  }
+
+  function saveState() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function structuredCloneSafe(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function deepMerge(base, incoming) {
+    if (!incoming || typeof incoming !== "object") return base;
+
+    Object.keys(incoming).forEach((key) => {
+      const value = incoming[key];
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        base[key] &&
+        typeof base[key] === "object" &&
+        !Array.isArray(base[key])
+      ) {
+        deepMerge(base[key], value);
+      } else {
+        base[key] = value;
+      }
+    });
+
+    return base;
+  }
+
+  function todayKey(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  function formatDate(dateKey) {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString("de-DE", {
+      weekday: "short",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric"
+    });
+  }
+
+  function setHeaderDate() {
+    const headerDate = $("#headerDate");
+    if (!headerDate) return;
+
+    headerDate.textContent = new Date().toLocaleDateString("de-DE", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric"
+    });
+  }
+
+  function bindNavigation() {
+    $$(".nav-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        const viewId = button.dataset.view;
+        if (!viewId) return;
+
+        $$(".view").forEach((view) => view.classList.add("hidden"));
+        const target = document.getElementById(viewId);
+        if (target) target.classList.remove("hidden");
+
+        $$(".nav-btn").forEach((btn) => btn.classList.remove("active"));
+        button.classList.add("active");
+
+        $("#appMain")?.scrollTo({ top: 0, behavior: "smooth" });
+        renderAll();
+      });
+    });
+  }
+
+  function bindTabs() {
+    $$(".view-tabs").forEach((tabBar) => {
+      tabBar.addEventListener("click", (event) => {
+        const button = event.target.closest(".tab-btn");
+        if (!button) return;
+
+        const view = button.closest(".view");
+        if (!view) return;
+
+        const tabName = button.dataset.tab;
+        const targetId = getTabTargetId(view.id, tabName);
+        if (!targetId) return;
+
+        $$(".tab-btn", tabBar).forEach((btn) => btn.classList.remove("active"));
+        button.classList.add("active");
+
+        $$(".tab-content", view).forEach((content) => {
+          content.classList.add("hidden");
+          content.classList.remove("active");
+        });
+
+        const target = document.getElementById(targetId);
+        if (target) {
+          target.classList.remove("hidden");
+          target.classList.add("active");
+        }
+
+        renderAll();
+      });
+    });
+  }
+
+  function getTabTargetId(viewId, tabName) {
+    const map = {
+      mealView: {
+        today: "todayTab",
+        history: "historyTab",
+        import: "importTab"
+      },
+      trainingView: {
+        today: "trainingTodayTab",
+        plan: "trainingPlanTab",
+        generator: "generatorTab"
+      },
+      progressView: {
+        weight: "weightTab",
+        stats: "statsTab"
+      }
+    };
+
+    return map[viewId]?.[tabName] || null;
+  }
+
+  function bindMeals() {
+    $$(".btn-add-item").forEach((button) => {
+      button.addEventListener("click", () => {
+        activeMeal = button.dataset.meal || "breakfast";
+        openMealModal();
+      });
+    });
+
+    $("#saveMealBtn")?.addEventListener("click", saveMealFromModal);
+    $("#cancelMealBtn")?.addEventListener("click", closeAllModals);
+
+    ["mealName", "mealAmount", "mealCalories", "mealProtein", "mealCarbs", "mealFat"].forEach((id) => {
+      document.getElementById(id)?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") saveMealFromModal();
+      });
+    });
+
+    MEALS.forEach((meal) => {
+      document.getElementById(`${meal}Items`)?.addEventListener("click", (event) => {
+        const deleteButton = event.target.closest(".meal-item-delete");
+        if (!deleteButton) return;
+
+        const index = Number(deleteButton.dataset.index);
+        deleteMealItem(meal, index);
+      });
+    });
+
+    setupImportArea("mealImportArea", "mealImportFile", importMeals);
+  }
+
+  function openMealModal() {
+    clearMealForm();
+    $("#addMealModal")?.classList.remove("hidden");
+    setTimeout(() => $("#mealName")?.focus(), 50);
+  }
+
+  function clearMealForm() {
+    ["mealName", "mealAmount", "mealCalories", "mealProtein", "mealCarbs", "mealFat"].forEach((id) => {
+      const input = document.getElementById(id);
+      if (input) input.value = "";
+    });
+  }
+
+  function saveMealFromModal() {
+    const name = $("#mealName")?.value.trim();
+    if (!name) {
+      toast("Bitte Lebensmittel eintragen.");
+      $("#mealName")?.focus();
+      return;
+    }
+
+    const entry = {
+      id: cryptoRandomId(),
+      name,
+      amount: $("#mealAmount")?.value.trim() || "",
+      calories: numberValue("mealCalories"),
+      protein: numberValue("mealProtein"),
+      carbs: numberValue("mealCarbs"),
+      fat: numberValue("mealFat"),
+      createdAt: new Date().toISOString()
+    };
+
+    const date = todayKey();
+    ensureMealDay(date);
+    state.meals[date][activeMeal].push(entry);
+    saveState();
+
+    closeAllModals();
+    renderAll();
+    toast("Lebensmittel gespeichert.");
+  }
+
+  function ensureMealDay(date) {
+    if (!state.meals[date]) {
+      state.meals[date] = {
+        breakfast: [],
+        lunch: [],
+        dinner: [],
+        snack: []
+      };
+    }
+
+    MEALS.forEach((meal) => {
+      if (!Array.isArray(state.meals[date][meal])) state.meals[date][meal] = [];
+    });
+  }
+
+  function deleteMealItem(meal, index) {
+    const date = todayKey();
+    ensureMealDay(date);
+
+    if (!Number.isInteger(index) || !state.meals[date][meal]?.[index]) return;
+
+    state.meals[date][meal].splice(index, 1);
+    saveState();
+    renderAll();
+  }
+
+  function renderMeals() {
+    const date = todayKey();
+    ensureMealDay(date);
+
+    let totals = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+
+    MEALS.forEach((meal) => {
+      const items = state.meals[date][meal] || [];
+      const container = document.getElementById(`${meal}Items`);
+      const mealTotals = sumItems(items);
+
+      totals.calories += mealTotals.calories;
+      totals.protein += mealTotals.protein;
+      totals.carbs += mealTotals.carbs;
+      totals.fat += mealTotals.fat;
+
+      const calsElement = document.getElementById(`${meal}Cals`);
+      if (calsElement) calsElement.textContent = `${round(mealTotals.calories)} kcal`;
+
+      if (!container) return;
+
+      if (!items.length) {
+        container.innerHTML = `<p class="no-data">Noch keine Einträge.</p>`;
+      } else {
+        container.innerHTML = items
+          .map(
+            (item, index) => `
+              <div class="meal-item">
+                <div class="meal-item-info">
+                  <div class="meal-item-name">${escapeHtml(item.name)}</div>
+                  <div class="meal-item-details">
+                    ${escapeHtml(item.amount || "Portion")}
+                    · ${round(item.calories)} kcal
+                    · P ${round(item.protein)}g
+                    · KH ${round(item.carbs)}g
+                    · F ${round(item.fat)}g
+                  </div>
+                </div>
+                <button class="meal-item-delete" data-index="${index}" aria-label="Eintrag löschen">Löschen</button>
+              </div>
+            `
+          )
+          .join("");
+      }
+    });
+
+    setText("totalCalories", round(totals.calories));
+    setText("totalProtein", `${round(totals.protein)}g`);
+    setText("totalCarbs", `${round(totals.carbs)}g`);
+    setText("totalFat", `${round(totals.fat)}g`);
+
+    setText("calorieCount", round(totals.calories));
+    setText("proteinMini", `${round(totals.protein)}g`);
+    setText("carbsMini", `${round(totals.carbs)}g`);
+    setText("fatMini", `${round(totals.fat)}g`);
+
+    setText("calorieGoal", state.settings.calories);
+    setText("proteinGoal", state.settings.protein);
+    setText("carbsGoal", state.settings.carbs);
+    setText("fatGoal", state.settings.fat);
+
+    updateCalorieRing(totals.calories);
+    renderMealHistory();
+  }
+
+  function renderMealHistory() {
+    const target = $("#mealHistory");
+    if (!target) return;
+
+    const dates = Object.keys(state.meals || {})
+      .filter((date) => MEALS.some((meal) => state.meals[date]?.[meal]?.length))
+      .sort()
+      .reverse();
+
+    if (!dates.length) {
+      target.innerHTML = `<p class="no-data">Noch kein Verlauf vorhanden.</p>`;
+      return;
+    }
+
+    target.innerHTML = dates
+      .map((date) => {
+        const allItems = MEALS.flatMap((meal) => state.meals[date]?.[meal] || []);
+        const totals = sumItems(allItems);
+
+        return `
+          <div class="meal-section">
+            <div class="meal-header">
+              <h3>${formatDate(date)}</h3>
+              <span class="meal-cals">${round(totals.calories)} kcal</span>
+            </div>
+            <div class="meal-item-details">
+              Protein ${round(totals.protein)}g · Kohlenhydrate ${round(totals.carbs)}g · Fett ${round(totals.fat)}g
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  function updateCalorieRing(calories) {
+    const circle = $("#calorieProgress");
+    if (!circle) return;
+
+    const circumference = 314.159;
+    const goal = Math.max(Number(state.settings.calories) || 2000, 1);
+    const progress = Math.min(calories / goal, 1);
+    const offset = circumference - progress * circumference;
+
+    circle.style.strokeDasharray = String(circumference);
+    circle.style.strokeDashoffset = String(offset);
+  }
+
+  function sumItems(items) {
+    return items.reduce(
+      (total, item) => {
+        total.calories += Number(item.calories) || 0;
+        total.protein += Number(item.protein) || 0;
+        total.carbs += Number(item.carbs) || 0;
+        total.fat += Number(item.fat) || 0;
+        return total;
+      },
+      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    );
+  }
+
+  function bindTraining() {
+    $("#generatePlanBtn")?.addEventListener("click", () => {
+      const plan = generateWorkoutPlanFromForm();
+      if (!plan) return;
+
+      state.workoutPlan = plan;
+      saveState();
+      renderAll();
+      toast("Trainingsplan erstellt.");
+      switchTrainingTab("plan");
+    });
+
+    setupImportArea("planImportArea", "planImportFile", importWorkoutPlan);
+
+    $("#trainingPlanView")?.addEventListener("click", handleExerciseTrackButton);
+    $("#todayWorkout")?.addEventListener("click", handleExerciseTrackButton);
+
+    $("#saveExerciseBtn")?.addEventListener("click", saveExerciseLog);
+    $("#cancelExerciseBtn")?.addEventListener("click", closeAllModals);
+  }
+
+  function generateWorkoutPlanFromForm() {
+    const goal = $("#goalSelect")?.value;
+    const level = $("#levelSelect")?.value;
+    const days = Number($('input[name="days"]:checked')?.value || 0);
+    const focus = $("#focusSelect")?.value;
+
+    if (!goal || !level || !days || !focus) {
+      toast("Bitte Ziel, Level, Trainingstage und Fokus auswählen.");
+      return null;
+    }
+
+    const reps = goal === "strength" ? "3-6" : goal === "weight_loss" ? "12-15" : "8-12";
+    const rest = goal === "strength" ? "2-3 Minuten" : "60-90 Sekunden";
+    const sets = level === "beginner" ? 3 : level === "advanced" ? 4 : 3;
+    const dayTemplates = buildDayTemplates(focus, days);
+
+    return {
+      type: "workout_plan",
+      name: `${days}er ${labelFor(focus)} Plan`,
+      goal,
+      level,
+      days_per_week: days,
+      focus,
+      created_at: new Date().toISOString(),
+      days: dayTemplates.map((template, index) => ({
+        day: `Tag ${index + 1}`,
+        title: template.title,
+        exercises: template.exercises.map((exercise) => ({
+          name: exercise,
+          sets,
+          reps,
+          rest,
+          notes: goal === "weight_loss" ? "Saubere Technik, kurze Pausen, optional 10-20 Min Cardio." : "Saubere Technik und kontrollierte Ausführung."
+        }))
+      }))
+    };
+  }
+
+  function buildDayTemplates(focus, days) {
+    const templates = {
+      full_body: [
+        ["Ganzkörper A", ["Kniebeugen", "Bankdrücken", "Rudern", "Schulterdrücken", "Plank"]],
+        ["Ganzkörper B", ["Kreuzheben", "Klimmzüge oder Latzug", "Ausfallschritte", "Liegestütze", "Crunches"]],
+        ["Ganzkörper C", ["Beinpresse", "Kurzhantelbankdrücken", "Kabelrudern", "Seitheben", "Hanging Knee Raises"]],
+        ["Ganzkörper D", ["Frontkniebeugen", "Dips", "Rumänisches Kreuzheben", "Face Pulls", "Russian Twists"]],
+        ["Ganzkörper E", ["Goblet Squats", "Schrägbankdrücken", "Einarmiges Rudern", "Beinbeuger", "Side Plank"]]
+      ],
+      push_pull_legs: [
+        ["Push", ["Bankdrücken", "Schulterdrücken", "Schrägbankdrücken", "Seitheben", "Trizepsdrücken"]],
+        ["Pull", ["Klimmzüge oder Latzug", "Langhantelrudern", "Kabelrudern", "Face Pulls", "Bizepscurls"]],
+        ["Beine", ["Kniebeugen", "Rumänisches Kreuzheben", "Beinpresse", "Wadenheben", "Plank"]],
+        ["Push 2", ["Kurzhantelbankdrücken", "Arnold Press", "Dips", "Seitheben", "Overhead Trizeps"]],
+        ["Pull 2", ["Kreuzheben", "Latzug eng", "T-Bar Rudern", "Reverse Flys", "Hammer Curls"]]
+      ],
+      upper_lower: [
+        ["Oberkörper A", ["Bankdrücken", "Rudern", "Schulterdrücken", "Latzug", "Curls"]],
+        ["Unterkörper A", ["Kniebeugen", "Rumänisches Kreuzheben", "Beinpresse", "Wadenheben", "Plank"]],
+        ["Oberkörper B", ["Schrägbankdrücken", "Klimmzüge oder Latzug", "Seitheben", "Kabelrudern", "Trizepsdrücken"]],
+        ["Unterkörper B", ["Kreuzheben", "Ausfallschritte", "Beinbeuger", "Beinstrecker", "Side Plank"]],
+        ["Oberkörper C", ["Dips", "Einarmiges Rudern", "Face Pulls", "Kurzhantel Schulterdrücken", "Hammer Curls"]]
+      ]
+    };
+
+    const selected = templates[focus] || templates.full_body;
+    return selected.slice(0, days).map(([title, exercises]) => ({ title, exercises }));
+  }
+
+  function renderTraining() {
+    renderTrainingPlan();
+    renderTodayWorkout();
+    renderWeekChart();
+  }
+
+  function renderTrainingPlan() {
+    const target = $("#trainingPlanView");
+    const plan = state.workoutPlan;
+    if (!target) return;
+
+    if (!plan?.days?.length) {
+      target.innerHTML = `<p class="no-data">Kein Trainingsplan erstellt</p>`;
+      return;
+    }
+
+    target.innerHTML = `
+      <div class="training-plan">
+        <h3>${escapeHtml(plan.name || "Trainingsplan")}</h3>
+        <p class="meal-item-details">
+          ${escapeHtml(labelFor(plan.goal))} · ${escapeHtml(labelFor(plan.level))} · ${Number(plan.days_per_week || plan.days.length)} Tage/Woche
+        </p>
+      </div>
+      ${plan.days
+        .map(
+          (day, dayIndex) => `
+            <div class="training-day">
+              <h4>${escapeHtml(day.day || `Tag ${dayIndex + 1}`)} · ${escapeHtml(day.title || "Training")}</h4>
+              ${(day.exercises || [])
+                .map((exercise, exerciseIndex) => renderExercise(exercise, dayIndex, exerciseIndex))
+                .join("")}
+            </div>
+          `
+        )
+        .join("")}
+    `;
+  }
+
+  function renderTodayWorkout() {
+    const target = $("#todayWorkout");
+    const status = $("#trainingStatus");
+    const plan = state.workoutPlan;
+
+    if (!target) return;
+
+    if (!plan?.days?.length) {
+      target.innerHTML = `<p class="no-data">Kein Training für heute geplant</p>`;
+      if (status) status.textContent = "Kein Plan aktiv";
+      return;
+    }
+
+    const todayIndex = getTodayTrainingDayIndex(plan);
+    if (todayIndex === null) {
+      target.innerHTML = `<p class="no-data">Heute ist laut Plan trainingsfrei.</p>`;
+      if (status) status.textContent = "Heute trainingsfrei";
+      return;
+    }
+
+    const day = plan.days[todayIndex];
+    if (status) status.textContent = day?.title || `Tag ${todayIndex + 1}`;
+
+    target.innerHTML = `
+      <div class="training-day">
+        <h4>Heute: ${escapeHtml(day.day || `Tag ${todayIndex + 1}`)} · ${escapeHtml(day.title || "Training")}</h4>
+        ${(day.exercises || [])
+          .map((exercise, exerciseIndex) => renderExercise(exercise, todayIndex, exerciseIndex))
+          .join("")}
+      </div>
+    `;
+  }
+
+  function renderExercise(exercise, dayIndex, exerciseIndex) {
+    return `
+      <div class="exercise">
+        <div class="exercise-name">${escapeHtml(exercise.name || "Übung")}</div>
+        <div class="exercise-details">
+          <span class="exercise-details-item">${escapeHtml(String(exercise.sets || 3))} Sätze</span>
+          <span class="exercise-details-item">${escapeHtml(String(exercise.reps || "8-12"))} Wdh.</span>
+          <span class="exercise-details-item">Pause: ${escapeHtml(exercise.rest || "90 Sekunden")}</span>
+        </div>
+        ${exercise.notes ? `<div class="exercise-notes">${escapeHtml(exercise.notes)}</div>` : ""}
+        <button
+          class="btn-secondary track-exercise-btn"
+          style="width: 100%; margin-top: .75rem;"
+          data-day="${dayIndex}"
+          data-exercise="${exerciseIndex}"
+        >
+          Übung tracken
+        </button>
+      </div>
+    `;
+  }
+
+  function getTodayTrainingDayIndex(plan) {
+    const daysPerWeek = Number(plan.days_per_week || plan.days.length);
+    const weekday = new Date().getDay(); // 0 So, 1 Mo ...
+    const mondayIndex = weekday === 0 ? 6 : weekday - 1;
+
+    const schedules = {
+      2: [0, 3],
+      3: [0, 2, 4],
+      4: [0, 1, 3, 4],
+      5: [0, 1, 2, 3, 4]
+    };
+
+    const trainingWeekdays = schedules[daysPerWeek] || Array.from({ length: Math.min(daysPerWeek, 7) }, (_, index) => index);
+    const schedulePosition = trainingWeekdays.indexOf(mondayIndex);
+
+    if (schedulePosition === -1) return null;
+    return schedulePosition % plan.days.length;
+  }
+
+  function renderWeekChart() {
+    const chart = $("#weekChart");
+    const plan = state.workoutPlan;
+    if (!chart) return;
+
+    const labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+    const daysPerWeek = Number(plan?.days_per_week || 0);
+    const schedules = {
+      2: [0, 3],
+      3: [0, 2, 4],
+      4: [0, 1, 3, 4],
+      5: [0, 1, 2, 3, 4]
+    };
+    const trainingDays = schedules[daysPerWeek] || [];
+
+    chart.innerHTML = labels
+      .map((label, index) => {
+        const active = trainingDays.includes(index);
+        return `<div class="week-bar" style="${active ? "border-color: var(--primary-color); color: var(--primary-color);" : ""}">${label}</div>`;
+      })
+      .join("");
+  }
+
+  function handleExerciseTrackButton(event) {
+    const button = event.target.closest(".track-exercise-btn");
+    if (!button) return;
+
+    const dayIndex = Number(button.dataset.day);
+    const exerciseIndex = Number(button.dataset.exercise);
+    const exercise = state.workoutPlan?.days?.[dayIndex]?.exercises?.[exerciseIndex];
+
+    if (!exercise) return;
+
+    activeExercise = {
+      dayIndex,
+      exerciseIndex,
+      exerciseName: exercise.name
+    };
+
+    $("#exerciseTitle").textContent = exercise.name || "Übung tracken";
+    $("#exerciseReps").value = "";
+    $("#exerciseWeight").value = "";
+    $("#exerciseNotes").value = "";
+    $("#trackExerciseModal")?.classList.remove("hidden");
+    setTimeout(() => $("#exerciseReps")?.focus(), 50);
+  }
+
+  function saveExerciseLog() {
+    if (!activeExercise) {
+      closeAllModals();
+      return;
+    }
+
+    const date = todayKey();
+    if (!state.trainingLogs[date]) state.trainingLogs[date] = [];
+
+    state.trainingLogs[date].push({
+      id: cryptoRandomId(),
+      ...activeExercise,
+      reps: numberValue("exerciseReps"),
+      weight: numberValue("exerciseWeight"),
+      notes: $("#exerciseNotes")?.value.trim() || "",
+      createdAt: new Date().toISOString()
+    });
+
+    saveState();
+    closeAllModals();
+    renderAll();
+    toast("Übung gespeichert.");
+  }
+
+  function switchTrainingTab(tabName) {
+    const button = $(`#trainingView .tab-btn[data-tab="${tabName}"]`);
+    if (button) button.click();
+  }
+
+  function bindProgress() {
+    $("#saveWeightBtn")?.addEventListener("click", saveWeight);
+
+    $("#weightInput")?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") saveWeight();
+    });
+  }
+
+  function saveWeight() {
+    const value = numberValue("weightInput");
+    if (!value || value <= 0) {
+      toast("Bitte ein gültiges Gewicht eintragen.");
+      $("#weightInput")?.focus();
+      return;
+    }
+
+    const date = todayKey();
+    const existing = state.weights.find((entry) => entry.date === date);
+
+    if (existing) {
+      existing.weight = value;
+      existing.updatedAt = new Date().toISOString();
+    } else {
+      state.weights.push({
+        id: cryptoRandomId(),
+        date,
+        weight: value,
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    state.weights.sort((a, b) => a.date.localeCompare(b.date));
+    saveState();
+    $("#weightInput").value = "";
+    renderAll();
+    toast("Gewicht gespeichert.");
+  }
+
+  function renderProgress() {
+    renderWeightHistory();
+    renderStats();
+  }
+
+  function renderWeightHistory() {
+    const list = $("#weightList");
+    if (!list) return;
+
+    const entries = [...(state.weights || [])].sort((a, b) => b.date.localeCompare(a.date));
+
+    if (!entries.length) {
+      list.innerHTML = `<p class="no-data">Noch keine Gewichtsdaten.</p>`;
+      return;
+    }
+
+    list.innerHTML = entries
+      .map(
+        (entry) => `
+          <div class="weight-entry">
+            <div class="weight-entry-date">${formatDate(entry.date)}</div>
+            <div class="weight-entry-value">${round(entry.weight, 1)} kg</div>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  function renderStats() {
+    const target = $("#statsGrid");
+    if (!target) return;
+
+    const weights = [...(state.weights || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const todayMeals = MEALS.flatMap((meal) => state.meals[todayKey()]?.[meal] || []);
+    const totals = sumItems(todayMeals);
+    const current = weights.at(-1);
+    const first = weights.at(0);
+    const diff = current && first ? current.weight - first.weight : 0;
+    const exerciseCount = Object.values(state.trainingLogs || {}).reduce((sum, logs) => sum + logs.length, 0);
+
+    target.innerHTML = `
+      <div class="summary-grid">
+        <div class="summary-item">
+          <div class="summary-label">Aktuelles Gewicht</div>
+          <div class="summary-value">${current ? `${round(current.weight, 1)} kg` : "-"}</div>
+          <div class="summary-target">Letzter Eintrag</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">Gewichtsänderung</div>
+          <div class="summary-value">${weights.length > 1 ? `${diff > 0 ? "+" : ""}${round(diff, 1)} kg` : "-"}</div>
+          <div class="summary-target">Seit Start</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">Heute Kalorien</div>
+          <div class="summary-value">${round(totals.calories)}</div>
+          <div class="summary-target">Ziel: ${state.settings.calories}</div>
+        </div>
+        <div class="summary-item">
+          <div class="summary-label">Getrackte Übungen</div>
+          <div class="summary-value">${exerciseCount}</div>
+          <div class="summary-target">Gesamt</div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindImportExport() {
+    $("#exportPlanBtn")?.addEventListener("click", () => {
+      if (!state.workoutPlan) {
+        toast("Es gibt noch keinen Trainingsplan.");
+        return;
+      }
+      downloadJson(state.workoutPlan, "trainingsplan.json");
+    });
+
+    $("#exportMealsBtn")?.addEventListener("click", () => {
+      downloadJson({ type: "meal_export", exported_at: new Date().toISOString(), meals: state.meals }, "mahlzeiten.json");
+    });
+
+    $("#exportBackupBtn")?.addEventListener("click", () => {
+      downloadJson({ type: "fittrack_backup", version: 1, exported_at: new Date().toISOString(), state }, "backup.json");
+    });
+
+    $("#importBackupBtn")?.addEventListener("click", () => $("#backupImportFile")?.click());
+    $("#backupImportFile")?.addEventListener("change", (event) => readJsonFile(event.target.files?.[0], importBackup));
+  }
+
+  function setupImportArea(areaId, fileId, handler) {
+    const area = document.getElementById(areaId);
+    const file = document.getElementById(fileId);
+    if (!area || !file) return;
+
+    area.addEventListener("click", () => file.click());
+
+    file.addEventListener("change", (event) => {
+      readJsonFile(event.target.files?.[0], handler);
+      file.value = "";
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      area.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        area.style.background = "rgba(0, 212, 255, 0.08)";
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      area.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        area.style.background = "";
+      });
+    });
+
+    area.addEventListener("drop", (event) => {
+      const droppedFile = event.dataTransfer?.files?.[0];
+      readJsonFile(droppedFile, handler);
+    });
+  }
+
+  function readJsonFile(file, handler) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(String(reader.result || "{}"));
+        handler(json);
+      } catch (error) {
+        console.error(error);
+        toast("JSON konnte nicht gelesen werden.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function importMeals(json) {
+    const logs = Array.isArray(json) ? json : [json];
+    let imported = 0;
+
+    logs.forEach((log) => {
+      if (!log || typeof log !== "object") return;
+
+      const date = normalizeDate(log.date) || todayKey();
+      const meal = normalizeMealName(log.meal || log.meal_type || log.category || "snack");
+      const items = Array.isArray(log.items) ? log.items : Array.isArray(log.meals) ? log.meals : [];
+
+      if (!items.length) return;
+
+      ensureMealDay(date);
+
+      items.forEach((item) => {
+        state.meals[date][meal].push({
+          id: cryptoRandomId(),
+          name: String(item.name || item.food || "Lebensmittel"),
+          amount: String(item.amount || item.quantity || ""),
+          calories: Number(item.calories || item.kcal || 0),
+          protein: Number(item.protein || 0),
+          carbs: Number(item.carbs || item.carbohydrates || 0),
+          fat: Number(item.fat || 0),
+          createdAt: new Date().toISOString()
+        });
+        imported += 1;
+      });
+    });
+
+    if (!imported) {
+      toast("Keine Mahlzeiten im JSON gefunden.");
+      return;
+    }
+
+    saveState();
+    renderAll();
+    toast(`${imported} Lebensmittel importiert.`);
+  }
+
+  function importWorkoutPlan(json) {
+    const plan = json?.type === "workout_plan" ? json : json?.workoutPlan || json?.plan;
+
+    if (!plan?.days?.length) {
+      toast("Kein gültiger Trainingsplan im JSON gefunden.");
+      return;
+    }
+
+    state.workoutPlan = {
+      type: "workout_plan",
+      name: plan.name || "Importierter Trainingsplan",
+      goal: plan.goal || "",
+      level: plan.level || "",
+      days_per_week: Number(plan.days_per_week || plan.days.length),
+      focus: plan.focus || "",
+      created_at: plan.created_at || new Date().toISOString(),
+      days: plan.days.map((day, index) => ({
+        day: day.day || `Tag ${index + 1}`,
+        title: day.title || day.name || `Training ${index + 1}`,
+        exercises: Array.isArray(day.exercises)
+          ? day.exercises.map((exercise) => ({
+              name: exercise.name || "Übung",
+              sets: exercise.sets || 3,
+              reps: exercise.reps || "8-12",
+              rest: exercise.rest || "90 Sekunden",
+              notes: exercise.notes || ""
+            }))
+          : []
+      }))
+    };
+
+    saveState();
+    renderAll();
+    toast("Trainingsplan importiert.");
+    switchTrainingTab("plan");
+  }
+
+  function importBackup(json) {
+    const importedState = json?.state || json?.fitnessState || json;
+
+    if (!importedState || typeof importedState !== "object") {
+      toast("Kein gültiges Backup gefunden.");
+      return;
+    }
+
+    if (!confirm("Backup importieren und aktuelle Daten überschreiben?")) return;
+
+    state = deepMerge(structuredCloneSafe(DEFAULT_STATE), importedState);
+    saveState();
+    loadSettingsIntoForm();
+    renderAll();
+    toast("Backup importiert.");
+  }
+
+  function normalizeDate(value) {
+    if (!value) return null;
+
+    const direct = String(value).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return todayKey(parsed);
+
+    return null;
+  }
+
+  function normalizeMealName(value) {
+    const key = String(value || "").toLowerCase();
+
+    if (key.includes("früh") || key.includes("breakfast")) return "breakfast";
+    if (key.includes("mittag") || key.includes("lunch")) return "lunch";
+    if (key.includes("abend") || key.includes("dinner")) return "dinner";
+    return "snack";
+  }
+
+  function bindSettings() {
+    $("#saveSettingsBtn")?.addEventListener("click", saveSettings);
+    $("#clearDataBtn")?.addEventListener("click", clearAllData);
+  }
+
+  function loadSettingsIntoForm() {
+    setValue("profileName", state.settings.profileName);
+    setValue("profileAge", state.settings.profileAge);
+    setValue("profileGender", state.settings.profileGender);
+    setValue("settingCalories", state.settings.calories);
+    setValue("settingProtein", state.settings.protein);
+    setValue("settingCarbs", state.settings.carbs);
+    setValue("settingFat", state.settings.fat);
+
+    const notifications = $("#settingNotifications");
+    if (notifications) notifications.checked = Boolean(state.settings.notifications);
+  }
+
+  async function saveSettings() {
+    state.settings.profileName = $("#profileName")?.value.trim() || "";
+    state.settings.profileAge = $("#profileAge")?.value || "";
+    state.settings.profileGender = $("#profileGender")?.value || "";
+    state.settings.calories = numberValue("settingCalories") || 2000;
+    state.settings.protein = numberValue("settingProtein") || 150;
+    state.settings.carbs = numberValue("settingCarbs") || 250;
+    state.settings.fat = numberValue("settingFat") || 67;
+    state.settings.notifications = Boolean($("#settingNotifications")?.checked);
+
+    if (state.settings.notifications && "Notification" in window && Notification.permission === "default") {
+      try {
+        const permission = await Notification.requestPermission();
+        state.settings.notifications = permission === "granted";
+        const checkbox = $("#settingNotifications");
+        if (checkbox) checkbox.checked = state.settings.notifications;
+      } catch (error) {
+        console.warn("Benachrichtigungen konnten nicht aktiviert werden:", error);
+      }
+    }
+
+    saveState();
+    renderAll();
+    toast("Einstellungen gespeichert.");
+  }
+
+  function clearAllData() {
+    if (!confirm("Wirklich alle FitTrack-Daten löschen?")) return;
+
+    localStorage.removeItem(STORAGE_KEY);
+    state = structuredCloneSafe(DEFAULT_STATE);
+    loadSettingsIntoForm();
+    renderAll();
+    toast("Alle Daten gelöscht.");
+  }
+
+  function bindModals() {
+    $$(".modal-close").forEach((button) => {
+      button.addEventListener("click", closeAllModals);
+    });
+
+    $$(".modal").forEach((modal) => {
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) closeAllModals();
+      });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeAllModals();
+    });
+  }
+
+  function closeAllModals() {
+    $$(".modal").forEach((modal) => modal.classList.add("hidden"));
+    activeExercise = null;
+  }
+
+  function renderAll() {
+    renderMeals();
+    renderTraining();
+    renderProgress();
+  }
+
+  function numberValue(id) {
+    const value = Number(document.getElementById(id)?.value || 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function setValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value ?? "";
+  }
+
+  function setText(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = String(value);
+  }
+
+  function round(value, digits = 0) {
+    const number = Number(value) || 0;
+    return Number(number.toFixed(digits));
+  }
+
+  function labelFor(value) {
+    const labels = {
+      muscle: "Muskelaufbau",
+      weight_loss: "Abnehmen",
+      strength: "Kraft",
+      general: "Allgemein fit",
+      beginner: "Anfänger",
+      intermediate: "Fortgeschritten",
+      advanced: "Fortgeschritten+",
+      full_body: "Ganzkörper",
+      push_pull_legs: "Push/Pull/Legs",
+      upper_lower: "Oberkörper/Unterkörper"
+    };
+
+    return labels[value] || value || "";
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function cryptoRandomId() {
+    if (window.crypto?.randomUUID) return crypto.randomUUID();
+    return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
+  function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function toast(message) {
+    let element = $("#fittrackToast");
+
+    if (!element) {
+      element = document.createElement("div");
+      element.id = "fittrackToast";
+      element.style.cssText = `
+        position: fixed;
+        left: 50%;
+        bottom: 82px;
+        transform: translateX(-50%);
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--primary-color);
+        box-shadow: 0 8px 24px rgba(0,0,0,.35);
+        padding: .85rem 1rem;
+        border-radius: 999px;
+        z-index: 2000;
+        max-width: calc(100vw - 2rem);
+        text-align: center;
+        font-size: .9rem;
+      `;
+      document.body.appendChild(element);
+    }
+
+    element.textContent = message;
+    element.hidden = false;
+
+    clearTimeout(toast.timeout);
+    toast.timeout = setTimeout(() => {
+      element.hidden = true;
+    }, 2200);
+  }
+
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch((error) => {
+        console.warn("Service Worker konnte nicht registriert werden:", error);
+      });
+    });
+  }
+
+  window.copyPrompt = async function copyPrompt(button) {
+    const text = button?.previousElementSibling?.innerText?.trim() || "";
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+
+    const oldText = button.textContent;
+    button.textContent = "Kopiert!";
+    setTimeout(() => {
+      button.textContent = oldText || "Kopieren";
+    }, 1200);
+  };
+})();
